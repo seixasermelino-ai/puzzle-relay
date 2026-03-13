@@ -18,6 +18,15 @@
         .font-mono { font-family: 'JetBrains Mono', monospace; }
         /* Custom slider style */
         input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%; background: #6366f1; cursor: pointer; }
+        
+        /* Pulse animation for the active area during alarm */
+        @keyframes pulse-bg {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.8; }
+        }
+        .animate-pulse-bg {
+            animation: pulse-bg 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
     </style>
 </head>
 <body>
@@ -28,7 +37,6 @@
 
         // Custom Icon Component to handle Lucide in this environment
         const Icon = ({ name, size = 24, className = "", fill = "none" }) => {
-            const iconRef = useRef(null);
             useEffect(() => {
                 if (window.lucide) {
                     window.lucide.createIcons();
@@ -94,20 +102,25 @@
                 }
             }, []);
 
+            // Main loop
             useEffect(() => {
                 let intervalId;
                 if (isRunning) {
                     intervalId = setInterval(() => {
+                        // Increment active time if not finished
                         if (activePuzzle === 'A' && !isFinishedA) setTimeA(prev => prev + 1);
                         if (activePuzzle === 'B' && !isFinishedB) setTimeB(prev => prev + 1);
 
+                        // Countdown logic
                         if (!isFinishedA && !isFinishedB) {
                             if (isAlarmRinging) {
                                 if (alarmCountdown % 3 === 0) playBeep();
                                 setAlarmCountdown(prev => {
                                     if (prev <= 1) {
+                                        // Auto-switch when alarm ends
+                                        const next = activePuzzle === 'A' ? 'B' : 'A';
                                         setIsAlarmRinging(false);
-                                        setActivePuzzle(current => current === 'A' ? 'B' : 'A');
+                                        setActivePuzzle(next);
                                         setCountdown(config.interval);
                                         return 0;
                                     }
@@ -128,7 +141,7 @@
                     }, 1000);
                 }
                 return () => clearInterval(intervalId);
-            }, [isRunning, activePuzzle, isFinishedA, isFinishedB, config, isAlarmRinging, playBeep, alarmCountdown]);
+            }, [isRunning, activePuzzle, isFinishedA, isFinishedB, config, isAlarmRinging, alarmCountdown, playBeep]);
 
             const handleTogglePlay = async () => {
                 initAudio();
@@ -144,7 +157,24 @@
 
             const handleManualSwitch = (target) => {
                 if (!isRunning) return;
-                let next = target === 'next' ? (activePuzzle === 'A' ? 'B' : 'A') : target;
+                
+                // If it's a switch request ('next' or the current active one during alarm)
+                let next;
+                if (target === 'next') {
+                    next = activePuzzle === 'A' ? 'B' : 'A';
+                } else {
+                    // Logic for chess-style tap: 
+                    // If alarm is ringing and I tap my OWN colorful area, I'm passing the turn.
+                    if (isAlarmRinging && target === activePuzzle) {
+                        next = activePuzzle === 'A' ? 'B' : 'A';
+                    } else if (!isAlarmRinging && target !== activePuzzle) {
+                        // If alarm isn't ringing, normal switch logic
+                        next = target;
+                    } else {
+                        return; // Ignore other taps
+                    }
+                }
+
                 if (next !== activePuzzle && !isFinishedA && !isFinishedB) {
                     setActivePuzzle(next);
                     setIsAlarmRinging(false);
@@ -163,37 +193,63 @@
                 <div className="flex flex-col h-screen bg-black text-white overflow-hidden select-none">
                     {/* Settings BTN */}
                     <div className="absolute top-6 right-6 z-50">
-                        <button onClick={() => setShowSettings(true)} className="p-3 bg-black/40 rounded-full backdrop-blur-md text-white/80"><Icon name="settings" /></button>
+                        <button onClick={(e) => { e.stopPropagation(); setShowSettings(true); }} className="p-3 bg-black/40 rounded-full backdrop-blur-md text-white/80"><Icon name="settings" /></button>
                     </div>
 
-                    {/* Puzzle A */}
-                    <div onClick={() => handleManualSwitch('A')} className={`flex-1 flex flex-col items-center justify-center transition-all duration-700 ${activePuzzle === 'A' ? 'bg-indigo-600' : 'bg-gray-900'} ${isFinishedA ? 'opacity-30' : ''}`}>
+                    {/* Puzzle A (Top) */}
+                    <div 
+                        onClick={() => handleManualSwitch('A')} 
+                        className={`flex-1 flex flex-col items-center justify-center transition-all duration-700 cursor-pointer
+                            ${activePuzzle === 'A' ? 'bg-indigo-600' : 'bg-gray-900'} 
+                            ${isFinishedA ? 'opacity-30' : ''}
+                            ${isAlarmRinging && activePuzzle === 'A' ? 'animate-pulse-bg ring-inset ring-8 ring-white/30' : ''}
+                        `}
+                    >
                         <div className="text-white/40 font-medium mb-1 uppercase tracking-widest text-xs">Puzzle 1</div>
-                        <div className="text-7xl font-bold font-mono">{formatTotalTime(timeA)}</div>
-                        <button onClick={(e) => { e.stopPropagation(); setIsFinishedA(true); if(activePuzzle==='A') handleManualSwitch('B'); }} className="mt-6 px-8 py-3 rounded-full border-2 border-white/20 flex items-center gap-2">
-                           <Icon name="check" size={18} /> {isFinishedA ? 'Finished' : 'Finish'}
-                        </button>
+                        <div className="text-7xl font-bold font-mono tracking-tighter drop-shadow-md">{formatTotalTime(timeA)}</div>
+                        {!isFinishedA && (
+                            <button onClick={(e) => { e.stopPropagation(); setIsFinishedA(true); if(activePuzzle==='A') handleManualSwitch('B'); }} className="mt-6 px-8 py-3 rounded-full border-2 border-white/20 flex items-center gap-2 hover:bg-white/10">
+                               <Icon name="check" size={18} /> Finish
+                            </button>
+                        )}
+                        {isFinishedA && <div className="mt-6 text-white/50 flex items-center gap-2"><Icon name="check-circle-2" size={18} /> Finished</div>}
                     </div>
 
-                    {/* Puzzle B */}
-                    <div onClick={() => handleManualSwitch('B')} className={`flex-1 flex flex-col items-center justify-center transition-all duration-700 ${activePuzzle === 'B' ? 'bg-teal-600' : 'bg-gray-900'} ${isFinishedB ? 'opacity-30' : ''}`}>
+                    {/* Puzzle B (Bottom) */}
+                    <div 
+                        onClick={() => handleManualSwitch('B')} 
+                        className={`flex-1 flex flex-col items-center justify-center transition-all duration-700 cursor-pointer
+                            ${activePuzzle === 'B' ? 'bg-teal-600' : 'bg-gray-900'} 
+                            ${isFinishedB ? 'opacity-30' : ''}
+                            ${isAlarmRinging && activePuzzle === 'B' ? 'animate-pulse-bg ring-inset ring-8 ring-white/30' : ''}
+                        `}
+                    >
                         <div className="text-white/40 font-medium mb-1 uppercase tracking-widest text-xs">Puzzle 2</div>
-                        <div className="text-7xl font-bold font-mono">{formatTotalTime(timeB)}</div>
-                        <button onClick={(e) => { e.stopPropagation(); setIsFinishedB(true); if(activePuzzle==='B') handleManualSwitch('A'); }} className="mt-6 px-8 py-3 rounded-full border-2 border-white/20 flex items-center gap-2">
-                           <Icon name="check" size={18} /> {isFinishedB ? 'Finished' : 'Finish'}
-                        </button>
+                        <div className="text-7xl font-bold font-mono tracking-tighter drop-shadow-md">{formatTotalTime(timeB)}</div>
+                        {!isFinishedB && (
+                            <button onClick={(e) => { e.stopPropagation(); setIsFinishedB(true); if(activePuzzle==='B') handleManualSwitch('A'); }} className="mt-6 px-8 py-3 rounded-full border-2 border-white/20 flex items-center gap-2 hover:bg-white/10">
+                               <Icon name="check" size={18} /> Finish
+                            </button>
+                        )}
+                        {isFinishedB && <div className="mt-6 text-white/50 flex items-center gap-2"><Icon name="check-circle-2" size={18} /> Finished</div>}
                     </div>
 
                     {/* Center Controller */}
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 flex items-center justify-center z-40 bg-black rounded-full border-4 border-gray-800 shadow-2xl">
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-44 h-44 flex items-center justify-center z-40 bg-black rounded-full border-4 border-gray-800 shadow-[0_0_50px_rgba(0,0,0,0.8)]">
                         <div className="flex flex-col items-center">
-                            <div className="text-2xl font-mono mb-2">{isAlarmRinging ? formatTotalTime(alarmCountdown) : formatTotalTime(countdown)}</div>
+                            <div className={`text-2xl font-mono mb-2 ${isAlarmRinging ? 'text-blue-400 animate-pulse' : 'text-white'}`}>
+                                {isAlarmRinging ? formatTotalTime(alarmCountdown) : formatTotalTime(countdown)}
+                            </div>
+                            
                             {isAlarmRinging ? (
-                                <button onClick={() => handleManualSwitch('next')} className="px-6 py-2 bg-white text-black font-bold rounded-xl animate-bounce flex items-center gap-2">
-                                    <Icon name="arrow-left-right" size={16} /> SWITCH
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); handleManualSwitch('next'); }} 
+                                    className="px-6 py-2 bg-white text-black font-black rounded-xl animate-bounce flex items-center gap-2 shadow-xl active:scale-95 transition-transform"
+                                >
+                                    <Icon name="arrow-left-right" size={18} /> SWITCH
                                 </button>
                             ) : (
-                                <button onClick={handleTogglePlay} className="w-14 h-14 bg-white text-black rounded-full flex items-center justify-center">
+                                <button onClick={(e) => { e.stopPropagation(); handleTogglePlay(); }} className="w-14 h-14 bg-white text-black rounded-full flex items-center justify-center active:scale-90 transition-transform">
                                     <Icon name={isRunning ? "pause" : "play"} fill="black" />
                                 </button>
                             )}
@@ -202,39 +258,61 @@
 
                     {/* Final Summary Overlay */}
                     {isFinishedA && isFinishedB && (
-                        <div className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-6 text-center">
+                        <div className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-6 text-center animate-in fade-in duration-500">
                             <div className="bg-white/5 p-10 rounded-[3rem] border border-white/10 w-full max-w-sm">
                                 <Icon name="trophy" size={48} className="text-yellow-500 mx-auto mb-4" />
                                 <h2 className="text-3xl font-bold mb-6">Complete!</h2>
                                 <div className="space-y-4 mb-8">
-                                    <div className="flex justify-between"><span>P1:</span> <span className="font-mono text-indigo-400">{formatTotalTime(timeA)}</span></div>
-                                    <div className="flex justify-between"><span>P2:</span> <span className="font-mono text-teal-400">{formatTotalTime(timeB)}</span></div>
+                                    <div className="flex justify-between items-center bg-white/5 p-4 rounded-xl">
+                                        <span className="text-gray-400">Puzzle 1:</span> 
+                                        <span className="font-mono text-xl font-bold text-indigo-400">{formatTotalTime(timeA)}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center bg-white/5 p-4 rounded-xl">
+                                        <span className="text-gray-400">Puzzle 2:</span> 
+                                        <span className="font-mono text-xl font-bold text-teal-400">{formatTotalTime(timeB)}</span>
+                                    </div>
                                 </div>
-                                <button onClick={() => window.location.reload()} className="w-full py-4 bg-white text-black font-bold rounded-2xl">New Session</button>
+                                <button onClick={() => window.location.reload()} className="w-full py-4 bg-white text-black font-bold rounded-2xl hover:bg-gray-200 transition-colors">New Session</button>
                             </div>
                         </div>
                     )}
 
                     {/* Settings Modal */}
                     {showSettings && (
-                        <div className="fixed inset-0 bg-black/90 z-[70] flex items-center justify-center p-6">
-                            <div className="bg-gray-900 p-8 rounded-3xl w-full max-w-sm border border-gray-800">
+                        <div className="fixed inset-0 bg-black/90 z-[70] flex items-center justify-center p-6 backdrop-blur-sm">
+                            <div className="bg-gray-900 p-8 rounded-3xl w-full max-w-sm border border-gray-800 shadow-2xl">
                                 <h3 className="text-xl font-bold mb-6">Settings</h3>
                                 <div className="mb-6">
-                                    <label className="text-[10px] text-gray-500 uppercase font-bold block mb-2">Interval (min)</label>
+                                    <label className="text-[10px] text-gray-500 uppercase font-bold block mb-2 tracking-widest">Interval (min)</label>
                                     <div className="grid grid-cols-4 gap-2">
                                         {[0.5, 5, 10, 15].map(m => (
-                                            <button key={m} onClick={() => { setConfig({...config, interval: m*60}); setCountdown(m*60); }} className={`py-2 rounded-lg border ${config.interval === m*60 ? 'bg-indigo-600 border-indigo-600' : 'border-gray-700 text-gray-400'}`}>{m<1 ? '30s' : m+'m'}</button>
+                                            <button key={m} onClick={() => { setConfig({...config, interval: m*60}); setCountdown(m*60); }} className={`py-2 rounded-lg border font-bold ${config.interval === m*60 ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-gray-700 text-gray-400'}`}>{m<1 ? '30s' : m+'m'}</button>
                                         ))}
                                     </div>
                                 </div>
-                                <div className="mb-8 p-4 bg-white/5 rounded-2xl text-center">
-                                    <p className="text-[10px] text-gray-500 uppercase mb-1">Inspired by</p>
-                                    <p className="font-bold text-sm mb-2">Canadam Puzzle</p>
-                                    <a href="https://youtu.be/QCmdrsiF7RM?si=gKwPFJCbtN1yIdkY" target="_blank" className="text-indigo-400 text-xs flex items-center justify-center gap-1">Watch Video <Icon name="external-link" size={12}/></a>
+                                
+                                <div className="mb-6">
+                                    <label className="text-[10px] text-gray-500 uppercase font-bold block mb-2 tracking-widest">Alarm Chime Volume</label>
+                                    <input 
+                                        type="range" min="0" max="1" step="0.1" 
+                                        value={config.alarmVolume} 
+                                        onChange={(e) => setConfig({...config, alarmVolume: parseFloat(e.target.value)})}
+                                        className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                    />
                                 </div>
-                                <button onClick={() => setShowSettings(false)} className="w-full py-4 bg-indigo-600 font-bold rounded-xl mb-3">Done</button>
-                                <button onClick={() => window.location.reload()} className="w-full py-4 bg-gray-800 font-bold rounded-xl text-red-400">Reset Everything</button>
+
+                                <div className="mb-8 p-4 bg-white/5 rounded-2xl text-center border border-white/5">
+                                    <p className="text-[9px] text-gray-500 uppercase tracking-tighter mb-1">Concept inspired by</p>
+                                    <p className="font-bold text-sm mb-2 text-white">Canadam Puzzle</p>
+                                    <a href="https://youtu.be/QCmdrsiF7RM?si=gKwPFJCbtN1yIdkY" target="_blank" className="text-indigo-400 text-xs flex items-center justify-center gap-1 hover:text-indigo-300 transition-colors">
+                                        Watch Video <Icon name="external-link" size={12}/>
+                                    </a>
+                                </div>
+                                
+                                <div className="space-y-3">
+                                    <button onClick={() => setShowSettings(false)} className="w-full py-4 bg-indigo-600 font-bold rounded-xl shadow-lg shadow-indigo-900/20 active:scale-95 transition-transform">Done</button>
+                                    <button onClick={() => window.location.reload()} className="w-full py-4 bg-gray-800 font-bold rounded-xl text-red-400 border border-red-900/10 active:scale-95 transition-transform">Reset Everything</button>
+                                </div>
                             </div>
                         </div>
                     )}
